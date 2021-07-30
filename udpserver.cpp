@@ -104,7 +104,7 @@ int main(int argc, char *argv[])
   logpath=".";
 
   double CPU_before, CPU_after;
-  struct timeval GTOD_before, GTOD_after, PktArr;
+  struct timeval GTOD_before, GTOD_after, PktArr,PktDpt;
   u_int64_t TSC_before,TSC_after;
   double samplefreq=0;
   byteCount=pktCount=0;
@@ -278,7 +278,7 @@ int main(int argc, char *argv[])
   
   printf("Estimated cpu to %f Hz.\n",CPU_before);
   printf("Sampling interval %f s.\n",dT);
-  u_int64_t rstart,rstop;/*rstart mean reciving start time*/
+  u_int64_t rstart,rstop,sstart,sstop;/*rstart mean reciving start time*/
   int sd, rc, n, cliLen;
   struct sockaddr_in cliAddr, servAddr;
   char msg[MAX_MSG];
@@ -305,6 +305,8 @@ int main(int argc, char *argv[])
   
   rstart=0;
   rstop=0;
+  sstart=0;
+  sstop=0;
   /* server infinite loop */
   transfer_data *message; 
   counter=0;
@@ -534,9 +536,9 @@ int main(int argc, char *argv[])
 	  logdat[arrpos].seq_no=arrpos;
 	  // Store the sending time of the previous PDU
 	  if((arrpos-1)>=0){
-	    logdat[arrpos-1].send_start=message->starttime;
-	    logdat[arrpos-1].send_stop=message->stoptime;
-	    logdat[arrpos-1].send_dept_time=message->depttime;
+	    logdat[arrpos-1].send_start=sstart;
+	    logdat[arrpos-1].send_stop=sstop;
+	    logdat[arrpos-1].send_dept_time=PktDpt;
 	  }
 	  // Store the receive time of this PDU. 
 	  logdat[arrpos].recv_start=rstart;
@@ -550,9 +552,15 @@ int main(int argc, char *argv[])
 	    message->recvstarttime=rstart;
 	    message->recvstoptime=rstop;
 	    message->recvtime=PktArr;
+      sstart=realcc();
+      message->starttime = sstart;
+      message->stoptime = sstop;
+      message->depttime = PktDpt;
 
 	    rc=sendto(sd, msg,n, 0,(struct sockaddr *) &cliAddr,sizeof(cliAddr));//size> app head
-	    if (rc<0){
+	    sstop=realcc();
+      gettimeofday(&PktDpt,NULL);
+      if (rc<0){
 	      printf("Issues with sending.\n");
 	    }
 	  }
