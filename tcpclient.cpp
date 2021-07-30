@@ -32,7 +32,13 @@ void killPrg(int sig);
 double estimateCPU(int samples, int sleeptime, char* fname);
 
 static inline u_int64_t realcc(void){
-  u_int64_t cc =  __builtin_ia32_rdtsc();
+   int result;
+  struct timespec tp;
+  clockid_t clk_id;
+  clk_id = CLOCK_MONOTONIC_RAW;
+
+  result = clock_gettime(clk_id, &tp);
+  u_int64_t cc = tp.tv_nsec;
   return cc;
 }
 
