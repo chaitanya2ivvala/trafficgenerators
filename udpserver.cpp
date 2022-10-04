@@ -14,8 +14,28 @@
 #include <stdlib.h>
 #include <iostream>
 #include <getopt.h>
+#include <stdint.h>
+
 #define MAX_MSG 1500
 #define MAX_PDU	100000
+#define RDTSC_START()            \
+	__asm__ volatile("CPUID\n\t" \
+	                 "RDTSC\n\t" \
+	                 "mov %%edx, %0\n\t" \
+	                 "mov %%eax, %1\n\t" \
+	                 : "=r" (start_hi), "=r" (start_lo) \
+	                 :: "%rax", "%rbx", "%rcx", "%rdx");
+
+#define RDTSC_STOP()              \
+	__asm__ volatile("RDTSCP\n\t" \
+	                 "mov %%edx, %0\n\t" \
+	                 "mov %%eax, %1\n\t" \
+	                 "CPUID\n\t" \
+	                 : "=r" (end_hi), "=r" (end_lo) \
+	                 :: "%rax", "%rbx", "%rcx", "%rdx");
+
+
+
 
 #include "udpgen.h"
 #include "sample.h"
@@ -86,6 +106,7 @@ static inline u_int64_t realcc(void){
   return cc;
 }
 
+
 double estimateCPU(int samples, int sleeptime, char* fname);
 double samplefreq;
 int runAsDaemon;
@@ -97,6 +118,8 @@ int pcounter,m,js=0,jr=0; /*previou pkt sequence number*/
 int cond;
 int main(int argc, char *argv[])
 {
+  uint32_t start_hi=0, start_lo=0; 
+	uint32_t   end_hi=0,   end_lo=0;
   int option_index, op,reqFlag=0;
   u_int32_t exp_id,run_id,key_id;
   exp_id=run_id=key_id=0;
@@ -273,7 +296,8 @@ int main(int argc, char *argv[])
   } else {
     CPU_before=estimateCPU(40,10000,0);
   }
-  TSC_before=realcc();
+  RDTSC_START();
+  TSC_before= (((uint64_t)start_hi) << 32) | start_lo;
   gettimeofday(&GTOD_before,NULL);
   
   printf("Estimated cpu to %f Hz.\n",CPU_before);
@@ -379,8 +403,8 @@ int main(int argc, char *argv[])
     FD_SET(sd, &rset);
     accept_timeout.tv_sec=SERVER_TIMEOUT;
     accept_timeout.tv_usec=0;
-    
-    rstart=realcc();
+    RDTSC_START();
+    rstart=(((uint64_t)start_hi) << 32) | start_lo;
     selectReturn=select(sd+1,&rset,NULL,NULL,&accept_timeout);
     if(selectReturn==-1){
       perror("Select Error:\n");
@@ -440,7 +464,8 @@ int main(int argc, char *argv[])
       }
     } else {
       n = recvfrom(sd, msg, MAX_MSG, 0,(struct sockaddr *) &cliAddr,(socklen_t*) &cliLen);
-      rstop=realcc();
+      RDTSC_STOP();
+      rstop=(((uint64_t)end_hi)   << 32) | end_lo;
       gettimeofday(&PktArr,NULL);
       if(n<0){
 	/*  printf("%s: cannot receive data \n",argv[0]); */
@@ -552,13 +577,15 @@ int main(int argc, char *argv[])
 	    message->recvstarttime=rstart;
 	    message->recvstoptime=rstop;
 	    message->recvtime=PktArr;
-      sstart=realcc();
+      RDTSC_START();
+      sstart=(((uint64_t)start_hi) << 32) | start_lo;
       message->starttime = sstart;
       message->stoptime = sstop;
       message->depttime = PktDpt;
 
 	    rc=sendto(sd, msg,n, 0,(struct sockaddr *) &cliAddr,sizeof(cliAddr));//size> app head
-	    sstop=realcc();
+	    RDTSC_STOP();
+      sstop=(((uint64_t)end_hi)   << 32) | end_lo;
       gettimeofday(&PktDpt,NULL);
       if (rc<0){
 	      printf("Issues with sending.\n");
@@ -578,7 +605,8 @@ int main(int argc, char *argv[])
   
   if(loglevel>1){  
     gettimeofday(&GTOD_after,NULL);
-    TSC_after=realcc();
+    RDTSC_STOP();
+    TSC_after=(((uint64_t)end_hi)   << 32) | end_lo;
     CPU_after=estimateCPU(40,100000,fname_cpu);
     
     printf("Start:%d.%06ld - %llu\n", (int)GTOD_before.tv_sec, GTOD_before.tv_usec, TSC_before);
