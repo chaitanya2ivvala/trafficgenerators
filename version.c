@@ -1,3 +1,3 @@
 #include "version.h"
-const char * build_git_sha = "0531b2e5fa8f1036416ce55e78c14d006e97ae36";
-const char * build_git_time = "sön  2 okt 2022 20:23:41 CEST";
+const char * build_git_sha = "dbd0df43dd74ccd4d71f51e59b4558fdb1702014";
+const char * build_git_time = "sön 15 mar 2026 09:46:46 CET";

@@ -8,6 +8,7 @@
 #include <netinet/in.h>
 #include <arpa/inet.h>
 #include <netdb.h>
+#include <linux/net_tstamp.h>
 #include <stdio.h>
 #include <unistd.h> /* close() */
 #include <string.h> /* memset() */
@@ -104,6 +105,32 @@ static inline u_int64_t realcc(void){
   result = clock_gettime(clk_id, &tp);
   u_int64_t cc = tp.tv_nsec;
   return cc;
+}
+
+static timeval realtime_now(){
+  struct timespec ts;
+  clock_gettime(CLOCK_REALTIME, &ts);
+  timeval tv;
+  tv.tv_sec = ts.tv_sec;
+  tv.tv_usec = ts.tv_nsec / 1000;
+  return tv;
+}
+
+static timeval recv_timestamp_from_cmsg(msghdr* msg, const timeval& fallback){
+  for ( cmsghdr* cmsg = CMSG_FIRSTHDR(msg); cmsg != NULL; cmsg = CMSG_NXTHDR(msg, cmsg) ) {
+    if ( cmsg->cmsg_level != SOL_SOCKET ) continue;
+    if ( cmsg->cmsg_type == SCM_TIMESTAMPNS ) {
+      const timespec* ts = reinterpret_cast<const timespec*>(CMSG_DATA(cmsg));
+      timeval tv;
+      tv.tv_sec = ts->tv_sec;
+      tv.tv_usec = ts->tv_nsec / 1000;
+      return tv;
+    }
+    if ( cmsg->cmsg_type == SCM_TIMESTAMP ) {
+      return *reinterpret_cast<const timeval*>(CMSG_DATA(cmsg));
+    }
+  }
+  return fallback;
 }
 
 
@@ -306,10 +333,17 @@ int main(int argc, char *argv[])
   int sd, rc, n, cliLen;
   struct sockaddr_in cliAddr, servAddr;
   char msg[MAX_MSG];
+  char control[CMSG_SPACE(sizeof(timespec))];
   /* socket creation */
   sd=socket(AF_INET, SOCK_DGRAM, 0);
   if(sd<0) {
     printf("%s: cannot open socket \n",argv[0]);
+    exit(1);
+  }
+  const int enable_rx_ts = 1;
+  rc = setsockopt(sd, SOL_SOCKET, SO_TIMESTAMPNS, &enable_rx_ts, sizeof(enable_rx_ts));
+  if(rc<0) {
+    perror("setsockopt(SO_TIMESTAMPNS)");
     exit(1);
   }
   
@@ -463,10 +497,21 @@ int main(int argc, char *argv[])
 	cond=0;
       }
     } else {
-      n = recvfrom(sd, msg, MAX_MSG, 0,(struct sockaddr *) &cliAddr,(socklen_t*) &cliLen);
+      iovec iov;
+      iov.iov_base = msg;
+      iov.iov_len = sizeof(msg);
+      msghdr recv_msg;
+      memset(&recv_msg, 0, sizeof(recv_msg));
+      recv_msg.msg_name = &cliAddr;
+      recv_msg.msg_namelen = cliLen;
+      recv_msg.msg_iov = &iov;
+      recv_msg.msg_iovlen = 1;
+      recv_msg.msg_control = control;
+      recv_msg.msg_controllen = sizeof(control);
+      n = recvmsg(sd, &recv_msg, 0);
       RDTSC_STOP();
       rstop=(((uint64_t)end_hi)   << 32) | end_lo;
-      gettimeofday(&PktArr,NULL);
+      PktArr = recv_timestamp_from_cmsg(&recv_msg, realtime_now());
       if(n<0){
 	/*  printf("%s: cannot receive data \n",argv[0]); */
 	continue;
@@ -581,12 +626,12 @@ int main(int argc, char *argv[])
       sstart=(((uint64_t)start_hi) << 32) | start_lo;
       message->starttime = sstart;
       message->stoptime = sstop;
-      message->depttime = PktDpt;
+      message->depttime = realtime_now();
 
 	    rc=sendto(sd, msg,n, 0,(struct sockaddr *) &cliAddr,sizeof(cliAddr));//size> app head
 	    RDTSC_STOP();
       sstop=(((uint64_t)end_hi)   << 32) | end_lo;
-      gettimeofday(&PktDpt,NULL);
+      PktDpt = realtime_now();
       if (rc<0){
 	      printf("Issues with sending.\n");
 	    }
@@ -798,4 +843,3 @@ void Sample(int sig){
 	pktCount=0;
   return;
 }
-
